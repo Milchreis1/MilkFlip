@@ -1,0 +1,6 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "cd willhaben-flipper/backend && python main.py"
+restartPolicyType = "always"
