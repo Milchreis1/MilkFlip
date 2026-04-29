@@ -1,9 +1,11 @@
 import asyncio
-import json
+import base64
+import hashlib
+import hmac as hmac_lib
 import logging
+import os
 import random
-import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import aiohttp
@@ -12,28 +14,19 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Willhaben is a Next.js SSR app. The search page returns HTML containing
-# a <script id="__NEXT_DATA__"> tag with all listing data as embedded JSON.
-# There is no separate JSON REST endpoint — the old /iad/search/atz/seo/... URL
-# returns 404. The correct search URL is below.
-BASE_URL = "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz"
+# Real Willhaben mobile API (reverse-engineered from Android app).
+# www.willhaben.at/iad/... serves HTML only — not a JSON API.
+API_BASE = "https://api.willhaben.at"
+TOKEN_PATH = "/restapi/v2/application-data"
+SEARCH_PATH = "/restapi/v2/search/atz/seo/kaufen-und-verkaufen/marktplatz"
 
-HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "de-AT,de;q=0.9,en;q=0.8",
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-}
+ORGANIZATION = "api@tailored-apps.com"
+CLIENT_HEADER = "api@tailored-apps.com;willhabenapp;android;8.15.0;responsive_app"
+# HMAC-SHA1 key from the willhaben Android app
+_HMAC_KEY = base64.b64decode("JDJhJDEwJHFUd2lnSFoyclJqQ2pSS3dQLlM2Vy4=")
 
-# Compiled once — extracts the JSON blob from the __NEXT_DATA__ script tag
-_NEXT_DATA_RE = re.compile(
-    r'<script\s+id="__NEXT_DATA__"\s+type="application/json">(.*?)</script>',
-    re.DOTALL,
-)
-
+_token_cache: Optional[str] = None
+_token_expires: Optional[datetime] = None
 _semaphore: Optional[asyncio.Semaphore] = None
 
 
@@ -44,110 +37,196 @@ def get_semaphore() -> asyncio.Semaphore:
     return _semaphore
 
 
-def _extract_next_data(html: str) -> Optional[dict]:
-    """Pull the __NEXT_DATA__ JSON blob out of an SSR HTML page."""
-    match = _NEXT_DATA_RE.search(html)
-    if not match:
-        return None
+# ── Token acquisition ──────────────────────────────────────────────────────────
+
+def _make_token_payload() -> dict:
+    salt = base64.b64encode(os.urandom(12)).decode()
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+0000")
+    message = f"{salt};{timestamp};{ORGANIZATION}".encode()
+    signature = base64.b64encode(
+        hmac_lib.new(_HMAC_KEY, message, hashlib.sha1).digest()
+    ).decode()
+    return {
+        "organization": ORGANIZATION,
+        "salt": salt,
+        "timestamp": timestamp,
+        "signature": signature,
+    }
+
+
+async def _fetch_token(session: aiohttp.ClientSession) -> Optional[str]:
+    url = f"{API_BASE}{TOKEN_PATH}"
+    payload = _make_token_payload()
+    logger.info(f"Fetching application token: POST {url}")
     try:
-        return json.loads(match.group(1))
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse __NEXT_DATA__ JSON: {e}")
+        async with session.post(
+            url,
+            json=payload,
+            headers={
+                "content-type": "application/json",
+                "x-wh-client": CLIENT_HEADER,
+            },
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            logger.info(f"Token response: HTTP {resp.status} from {url}")
+            if resp.status != 200:
+                text = await resp.text()
+                logger.error(f"Token fetch failed HTTP {resp.status} | body: {text[:300]}")
+                return None
+            data = await resp.json(content_type=None)
+            token_obj = (data.get("applicationToken") or {})
+            token = token_obj.get("value")
+            expire_in = token_obj.get("expireInSeconds", 3600)
+            logger.info(f"Application token acquired (expires in {expire_in}s)")
+            return token
+    except Exception as e:
+        logger.error(f"Token fetch exception: {e}")
         return None
+
+
+async def get_token(session: aiohttp.ClientSession) -> Optional[str]:
+    global _token_cache, _token_expires
+    now = datetime.now(timezone.utc)
+    if _token_cache and _token_expires and now < _token_expires:
+        return _token_cache
+    token = await _fetch_token(session)
+    if token:
+        _token_cache = token
+        _token_expires = now + timedelta(seconds=3300)  # refresh 5 min before expiry
+    return token
+
+
+# ── Listing parser ─────────────────────────────────────────────────────────────
+
+def _flatten_attributes(attrs) -> dict:
+    """Convert attributes list [{name, values}, ...] → {NAME: value} dict."""
+    result: dict = {}
+    if isinstance(attrs, dict):
+        attrs = attrs.get("attribute") or []
+    if not isinstance(attrs, list):
+        return result
+    for attr in attrs:
+        if not isinstance(attr, dict):
+            continue
+        name = (attr.get("name") or "").upper()
+        values = attr.get("values") or []
+        if name and values:
+            result[name] = values[0]
+    return result
 
 
 def _parse_listing(item: dict) -> Optional[dict]:
     try:
-        # advertId is the canonical field; fall back to id for safety
-        ad_id = str(item.get("advertId") or item.get("id") or "")
+        ad_id = str(item.get("id") or item.get("advertId") or "")
         if not ad_id:
             return None
 
-        heading = item.get("heading") or item.get("description", "")
+        # Mobile API uses "description" for the listing title
+        title = item.get("description") or item.get("heading") or ""
 
-        # Price lives under advertPriceInfo.amount
-        advert_price_info = item.get("advertPriceInfo") or {}
-        price_raw = advert_price_info.get("amount") or item.get("price")
+        attrs = _flatten_attributes(item.get("attributes") or [])
+
+        # Price: try attributes first, then advertPriceInfo
+        price_raw = attrs.get("PRICE") or attrs.get("PRICE_SUGGESTING_TEXT")
+        if price_raw is None:
+            price_info = item.get("advertPriceInfo") or {}
+            price_raw = price_info.get("amount")
         if price_raw is None:
             return None
         try:
-            price = float(str(price_raw).replace(",", ".").replace(" ", ""))
+            price = float(
+                str(price_raw).replace(",", ".").replace(" ", "").replace("€", "").strip()
+            )
         except (ValueError, TypeError):
             return None
 
-        advert_url = item.get("advertUrl") or item.get("slug", "")
-        full_url = f"https://www.willhaben.at{advert_url}" if advert_url else ""
+        # URL: prefer contextLinkList self-link, fall back to canonical path
+        url = ""
+        context_links = item.get("contextLinkList") or []
+        if isinstance(context_links, dict):
+            context_links = context_links.get("contextLink") or []
+        for link in context_links:
+            if not isinstance(link, dict):
+                continue
+            href = link.get("href") or link.get("url") or ""
+            if href:
+                url = href if href.startswith("http") else f"https://www.willhaben.at{href}"
+                break
+        if not url:
+            url = f"https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/d/{ad_id}"
 
+        # Seller
         seller_info = item.get("advertiserInfo") or item.get("sellerInfo") or {}
         seller_id = str(seller_info.get("userId") or seller_info.get("id") or "")
-        seller_type = seller_info.get("type") or seller_info.get("sellerType") or ""
+        seller_type = str(seller_info.get("type") or seller_info.get("sellerType") or "")
 
-        # Location is inside an attributes.attribute list:
-        # [{"name": "LOCATION", "values": ["Wien"]}, ...]
-        location: Optional[str] = None
-        attributes = item.get("attributes") or {}
-        attr_list = []
-        if isinstance(attributes, dict):
-            attr_list = attributes.get("attribute") or []
-        elif isinstance(attributes, list):
-            attr_list = attributes
-        for attr in attr_list:
-            if not isinstance(attr, dict):
-                continue
-            name = (attr.get("name") or "").upper()
-            if name in ("LOCATION", "DISTRICT", "STATE"):
-                vals = attr.get("values") or []
-                if vals:
-                    location = str(vals[0])
-                    break
+        # Location
+        location = (
+            attrs.get("LOCATION")
+            or attrs.get("DISTRICT")
+            or attrs.get("STATE")
+            or (item.get("location") if isinstance(item.get("location"), str) else None)
+        )
 
-        # advertImageList is a list of image objects
+        # Images
         images = item.get("advertImageList") or item.get("images") or []
         if isinstance(images, dict):
             images = images.get("advertImage") or []
         images_count = len(images) if isinstance(images, list) else 0
 
-        publish_date = item.get("publishDate") or item.get("startDate")
+        # Age
+        publish_date = item.get("publishDate") or attrs.get("PUBLISHED") or item.get("startDate")
         age_minutes: Optional[float] = None
         if publish_date:
             try:
-                pub_dt = datetime.fromisoformat(
-                    str(publish_date).replace("Z", "+00:00")
-                )
-                now_utc = datetime.utcnow().replace(tzinfo=pub_dt.tzinfo)
-                age_minutes = (now_utc - pub_dt).total_seconds() / 60
+                pub_dt = datetime.fromisoformat(str(publish_date).replace("Z", "+00:00"))
+                age_minutes = (datetime.now(timezone.utc) - pub_dt).total_seconds() / 60
             except Exception:
                 pass
 
         return {
             "id": ad_id,
-            "title": heading,
+            "title": title,
             "price": price,
-            "url": full_url,
+            "url": url,
             "seller_id": seller_id,
             "seller_type": seller_type,
             "images_count": images_count,
             "location": location,
-            "category": item.get("categoryPath") or item.get("category"),
+            "category": item.get("categoryPath") or attrs.get("CATEGORY"),
             "age_minutes": age_minutes,
         }
     except Exception as e:
-        logger.error(f"Failed to parse listing: {e}")
+        logger.error(f"Failed to parse listing: {e}", exc_info=True)
         return None
 
+
+# ── HTTP fetch ─────────────────────────────────────────────────────────────────
 
 async def _fetch_page(
     session: aiohttp.ClientSession,
     keyword: str,
-    page: int = 1,
+    page: int = 0,
     max_price: Optional[float] = None,
     min_price: Optional[float] = None,
     category_id: Optional[str] = None,
 ) -> List[dict]:
+    global _token_cache
+
+    token = await get_token(session)
+
+    headers = {
+        "Accept": "application/json",
+        "x-wh-client": CLIENT_HEADER,
+    }
+    if token:
+        headers["x-wh-application-token"] = token
+
     params: dict = {
         "keyword": keyword,
         "page": page,
         "rows": 30,
+        "sort": 1,  # 1=latest first
     }
     if max_price is not None:
         params["PRICE_TO"] = int(max_price)
@@ -156,96 +235,91 @@ async def _fetch_page(
     if category_id:
         params["areaId"] = category_id
 
-    # Build the full URL for debug logging before the request
-    query_string = "&".join(f"{k}={v}" for k, v in params.items())
-    full_url = f"{BASE_URL}?{query_string}"
-    logger.info(f"Fetching: {full_url}")
+    url = f"{API_BASE}{SEARCH_PATH}"
+    debug_qs = "&".join(f"{k}={v}" for k, v in params.items())
+    logger.info(f"GET {url}?{debug_qs}")
 
     async with get_semaphore():
         for attempt in range(3):
             try:
                 async with session.get(
-                    BASE_URL,
+                    url,
                     params=params,
-                    headers=HEADERS,
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     logger.info(
-                        f"Response: HTTP {resp.status} for '{keyword}' page {page} "
-                        f"(attempt {attempt+1})"
+                        f"Response: HTTP {resp.status} | '{keyword}' page {page} attempt {attempt+1}"
                     )
 
                     if resp.status == 429:
                         wait = 60 * (attempt + 1)
-                        logger.warning(
-                            f"Rate limited (429), waiting {wait}s — attempt {attempt+1}/3"
-                        )
+                        logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt+1}/3)")
                         await asyncio.sleep(wait)
                         continue
+
+                    if resp.status == 401:
+                        logger.warning("HTTP 401 — token invalid, forcing refresh")
+                        _token_cache = None
+                        token = await get_token(session)
+                        if token:
+                            headers["x-wh-application-token"] = token
+                        await asyncio.sleep(2)
+                        continue
+
                     if resp.status == 403:
                         logger.critical(
-                            "HTTP 403 from Willhaben — möglicherweise geblockt, "
-                            "User-Agent prüfen"
+                            f"HTTP 403 from {url} — IP or token blocked"
                         )
                         return []
+
                     if resp.status != 200:
                         text = await resp.text()
                         logger.error(
-                            f"Unexpected HTTP {resp.status} for '{keyword}' | "
-                            f"snippet: {text[:300]}"
+                            f"HTTP {resp.status} | URL: {url}?{debug_qs} | body: {text[:400]}"
                         )
                         return []
 
-                    html = await resp.text()
-                    next_data = _extract_next_data(html)
-                    if not next_data:
-                        logger.error(
-                            f"No __NEXT_DATA__ found in response for '{keyword}' "
-                            f"page {page} | HTML snippet: {html[:300]}"
-                        )
-                        return []
-
-                    # Path: props → pageProps → searchResult →
-                    #         advertSummaryList → advertSummary
                     try:
-                        ads = (
-                            next_data["props"]["pageProps"]["searchResult"]
-                            ["advertSummaryList"]["advertSummary"]
-                        )
-                    except (KeyError, TypeError):
+                        data = await resp.json(content_type=None)
+                    except Exception as e:
+                        text = await resp.text()
+                        logger.error(f"JSON parse error: {e} | snippet: {text[:300]}")
+                        return []
+
+                    ads = (
+                        (data.get("advertSummaryList") or {}).get("advertSummary")
+                        or data.get("ads")
+                        or data.get("items")
+                        or []
+                    )
+
+                    if not isinstance(ads, list):
                         logger.error(
-                            f"Unexpected __NEXT_DATA__ structure for '{keyword}'. "
-                            f"Top-level keys: {list(next_data.get('props', {}).get('pageProps', {}).keys())}"
+                            f"Unexpected response shape for '{keyword}'. "
+                            f"Top-level keys: {list(data.keys())}"
                         )
                         return []
 
-                    listings = []
-                    for ad in ads:
-                        parsed = _parse_listing(ad)
-                        if parsed:
-                            listings.append(parsed)
-
-                    logger.info(
-                        f"Parsed {len(listings)} listings for '{keyword}' page {page}"
-                    )
+                    listings = [p for ad in ads if (p := _parse_listing(ad)) is not None]
+                    logger.info(f"Parsed {len(listings)}/{len(ads)} listings for '{keyword}' page {page}")
                     return listings
 
             except asyncio.TimeoutError:
-                logger.warning(
-                    f"Timeout fetching '{keyword}' page {page} (attempt {attempt+1})"
-                )
+                logger.warning(f"Timeout for '{keyword}' page {page} attempt {attempt+1}")
                 if attempt < 2:
                     await asyncio.sleep(5)
             except aiohttp.ClientError as e:
-                logger.error(f"Network error fetching '{keyword}': {e}")
+                logger.error(f"Network error for '{keyword}': {e}")
                 if attempt < 2:
                     await asyncio.sleep(5)
 
     return []
 
 
+# ── Profile scrape ─────────────────────────────────────────────────────────────
+
 async def scrape_profile(profile: dict) -> List[dict]:
-    """Scrape all pages for a single search profile."""
     keyword = profile["query"]
     max_price = profile.get("max_price") or settings.MAX_BUDGET_EUR
     min_price = profile.get("min_price")
@@ -254,14 +328,12 @@ async def scrape_profile(profile: dict) -> List[dict]:
     results: List[dict] = []
 
     async with aiohttp.ClientSession() as session:
-        page = 1  # Willhaben pagination is 1-based
+        page = 0
         while True:
-            delay = random.uniform(3, 8)
-            await asyncio.sleep(delay)
+            await asyncio.sleep(random.uniform(3, 8))
 
             listings = await _fetch_page(
-                session,
-                keyword,
+                session, keyword,
                 page=page,
                 max_price=max_price,
                 min_price=min_price,
@@ -283,7 +355,7 @@ async def scrape_profile(profile: dict) -> List[dict]:
                 break
 
             page += 1
-            if page > 5:
+            if page >= 5:
                 break
 
     logger.info(f"Scraped {len(results)} listings for '{keyword}'")
