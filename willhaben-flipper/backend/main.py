@@ -2,6 +2,7 @@ import asyncio
 import logging
 import logging.handlers
 import sys
+from datetime import datetime, timedelta, timezone
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -49,6 +50,10 @@ async def scrape_job():
         logger.info("No active profiles, skipping scrape cycle")
         return
 
+    # Any listing seen before this cutoff is considered stale for alerting purposes.
+    run_start = datetime.now(timezone.utc)
+    freshness_cutoff = run_start - timedelta(minutes=15)
+
     logger.info(f"Starting scrape cycle for {len(profiles)} profiles")
 
     for profile in profiles:
@@ -60,8 +65,19 @@ async def scrape_job():
                 is_new = database.upsert_listing(listing)
                 database.add_price_history(search_term, listing["price"], listing["id"])
 
+                # Only alert for listings discovered in this run.
                 if not is_new:
                     continue
+
+                # Defense-in-depth: re-check seen_at is within the last 15 minutes.
+                seen_at = listing.get("seen_at")
+                if seen_at:
+                    if isinstance(seen_at, str):
+                        seen_at = datetime.fromisoformat(seen_at)
+                    if seen_at.replace(tzinfo=timezone.utc) < freshness_cutoff:
+                        logger.debug(f"Skipping stale listing {listing['id']} (seen_at too old)")
+                        continue
+
                 if not analyzer.should_alert(listing):
                     continue
                 if database.was_recently_alerted(listing["id"], settings.ALERT_COOLDOWN_HOURS):
@@ -69,6 +85,20 @@ async def scrape_job():
 
                 scored = analyzer.analyze_listing(listing, search_term)
                 if scored is None:
+                    continue
+
+                # Verify the listing still exists on Willhaben before alerting.
+                live = await scraper.verify_url(scored.listing.url)
+                if live is False:
+                    database.mark_listing_inactive(scored.listing.id)
+                    logger.info(
+                        f"Skipped alert — listing gone (404): '{scored.listing.title}'"
+                    )
+                    continue
+                if live is None:
+                    logger.warning(
+                        f"Skipped alert — URL check failed (unknown): '{scored.listing.title}'"
+                    )
                     continue
 
                 alert_dict = {
@@ -93,6 +123,12 @@ async def scrape_job():
 
         except Exception as e:
             logger.error(f"Error scraping profile '{profile.get('name')}': {e}", exc_info=True)
+
+    # Background: verify stale DB listings and mark gone ones inactive.
+    try:
+        await scraper.check_stale_listings(older_than_hours=24)
+    except Exception as e:
+        logger.error(f"Stale listing check failed: {e}", exc_info=True)
 
     logger.info("Scrape cycle complete")
 

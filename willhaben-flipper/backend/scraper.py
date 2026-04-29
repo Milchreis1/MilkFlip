@@ -7,6 +7,7 @@ from typing import List, Optional
 
 import aiohttp
 
+import database
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -294,3 +295,55 @@ async def scrape_profile(profile: dict) -> List[dict]:
 
     logger.info(f"Scraped {len(results)} listings for '{keyword}'")
     return results
+
+
+# ── Listing liveness checks ────────────────────────────────────────────────────
+
+async def verify_url(url: str) -> Optional[bool]:
+    """
+    HEAD-check a Willhaben listing URL.
+    Returns True  → HTTP 200, listing is live.
+    Returns False → HTTP 404, listing is gone.
+    Returns None  → other status / network error (do not act on uncertainty).
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.head(
+                url,
+                headers=HEADERS,
+                allow_redirects=True,
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status == 200:
+                    return True
+                if resp.status == 404:
+                    return False
+                logger.debug(f"verify_url: HTTP {resp.status} for {url}")
+                return None
+    except Exception as e:
+        logger.debug(f"verify_url error for {url}: {e}")
+        return None
+
+
+async def check_stale_listings(older_than_hours: int = 24) -> int:
+    """
+    Verify listings in the DB that haven't been seen recently.
+    Marks listings inactive when they return HTTP 404.
+    Returns the number of listings marked inactive.
+    """
+    stale = database.get_stale_active_listings(older_than_hours)
+    if not stale:
+        return 0
+
+    logger.info(f"Checking {len(stale)} stale listings for liveness")
+    marked = 0
+    for row in stale:
+        result = await verify_url(row["url"])
+        if result is False:
+            database.mark_listing_inactive(row["id"])
+            marked += 1
+            logger.info(f"Marked inactive (404): '{row['title']}' [{row['id']}]")
+        await asyncio.sleep(random.uniform(1, 3))
+
+    logger.info(f"Stale check done: {marked}/{len(stale)} marked inactive")
+    return marked

@@ -368,6 +368,28 @@ def remove_from_blacklist(seller_id: str):
         cur.execute("DELETE FROM blacklist WHERE seller_id = %s", (seller_id,))
 
 
+def mark_listing_inactive(listing_id: str):
+    with db_conn() as cur:
+        cur.execute(
+            "UPDATE listings SET status = 'inactive' WHERE id = %s",
+            (listing_id,),
+        )
+
+
+def get_stale_active_listings(older_than_hours: int = 24) -> List[dict]:
+    """Return listings that haven't been seen recently and are not yet inactive."""
+    with db_conn() as cur:
+        cur.execute(
+            """SELECT id, url, title FROM listings
+               WHERE seen_at < NOW() - INTERVAL '1 hour' * %s
+               AND status != 'inactive'
+               ORDER BY seen_at ASC
+               LIMIT 100""",
+            (older_than_hours,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
 def get_seller_listing_count(seller_id: str) -> int:
     with db_conn() as cur:
         cur.execute(
