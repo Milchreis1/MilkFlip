@@ -140,20 +140,9 @@ def _parse_listing(item: dict) -> Optional[dict]:
         except (ValueError, TypeError):
             return None
 
-        # URL: prefer contextLinkList self-link, fall back to canonical path
-        url = ""
-        context_links = item.get("contextLinkList") or []
-        if isinstance(context_links, dict):
-            context_links = context_links.get("contextLink") or []
-        for link in context_links:
-            if not isinstance(link, dict):
-                continue
-            href = link.get("href") or link.get("url") or ""
-            if href:
-                url = href if href.startswith("http") else f"https://www.willhaben.at{href}"
-                break
-        if not url:
-            url = f"https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/d/{ad_id}"
+        # Canonical Willhaben listing URL — always built from the ad ID.
+        # contextLinkList entries from the API are unreliable/malformed.
+        url = f"https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/d/{ad_id}"
 
         # Seller
         seller_info = item.get("advertiserInfo") or item.get("sellerInfo") or {}
@@ -300,6 +289,14 @@ async def _fetch_page(
                             f"Top-level keys: {list(data.keys())}"
                         )
                         return []
+
+                    # Log the first raw item once (page 0 only) so field names are visible
+                    if page == 0 and ads:
+                        import json as _json
+                        logger.info(
+                            f"RAW first item sample for '{keyword}':\n"
+                            + _json.dumps(ads[0], ensure_ascii=False, indent=2)
+                        )
 
                     listings = [p for ad in ads if (p := _parse_listing(ad)) is not None]
                     logger.info(f"Parsed {len(listings)}/{len(ads)} listings for '{keyword}' page {page}")
