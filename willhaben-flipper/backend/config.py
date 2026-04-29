@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     MAX_SELLER_LISTINGS: int = Field(default=5, env="MAX_SELLER_LISTINGS")
     TELEGRAM_BOT_TOKEN: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID: str = Field(default="", env="TELEGRAM_CHAT_ID")
-    DATABASE_PATH: str = Field(default="flipper.db", env="DATABASE_PATH")
+    DATABASE_URL: str = Field(default="postgresql://localhost/flipper", env="DATABASE_URL")
     API_PORT: int = Field(default=8000, env="API_PORT")
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
 

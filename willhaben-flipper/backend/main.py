@@ -110,7 +110,7 @@ def print_banner():
         f"║ Scrape-Interval:  {settings.SCRAPE_INTERVAL_MINUTES} min        ║\n"
         f"║ Budget-Limit:     {settings.MAX_BUDGET_EUR:.0f}€        ║\n"
         f"║ Threshold:        {settings.PRICE_THRESHOLD_PERCENT:.0f}%         ║\n"
-        f"║ DB:               {settings.DATABASE_PATH:<11}║\n"
+        f"║ DB:               {'postgres':<11}║\n"
         f"║ Dashboard:        :{settings.API_PORT:<5}        ║\n"
         "╚══════════════════════════════╝\n"
     )

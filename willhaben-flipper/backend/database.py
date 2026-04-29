@@ -1,4 +1,5 @@
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import logging
 from datetime import datetime
 from typing import Optional, List
@@ -9,30 +10,24 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(settings.DATABASE_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+def get_connection():
+    return psycopg2.connect(settings.DATABASE_URL)
 
 
 @contextmanager
 def db_conn():
     conn = get_connection()
     try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+        with conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                yield cur
     finally:
         conn.close()
 
 
 def init_db():
-    with db_conn() as conn:
-        conn.executescript("""
+    with db_conn() as cur:
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS listings (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -45,18 +40,20 @@ def init_db():
                 category TEXT,
                 seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT DEFAULT 'new'
-            );
-
+            )
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS price_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 search_term TEXT NOT NULL,
                 price REAL NOT NULL,
                 listing_id TEXT,
                 seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
+            )
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS alerts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 listing_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 price REAL NOT NULL,
@@ -70,10 +67,11 @@ def init_db():
                 age_minutes REAL,
                 alerted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 user_action TEXT
-            );
-
+            )
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS search_profiles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 query TEXT NOT NULL,
                 category_id TEXT,
@@ -81,69 +79,72 @@ def init_db():
                 min_price REAL,
                 active INTEGER DEFAULT 1,
                 custom_threshold REAL
-            );
-
+            )
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS blacklist (
                 seller_id TEXT PRIMARY KEY,
                 reason TEXT,
                 added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
+            )
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS watchlist (
                 seller_id TEXT PRIMARY KEY,
                 note TEXT,
                 added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_listings_seen_at ON listings(seen_at);
-            CREATE INDEX IF NOT EXISTS idx_listings_seller_id ON listings(seller_id);
-            CREATE INDEX IF NOT EXISTS idx_price_history_search_term ON price_history(search_term);
-            CREATE INDEX IF NOT EXISTS idx_price_history_seen_at ON price_history(seen_at);
-            CREATE INDEX IF NOT EXISTS idx_alerts_listing_id ON alerts(listing_id);
-            CREATE INDEX IF NOT EXISTS idx_alerts_alerted_at ON alerts(alerted_at);
-            CREATE INDEX IF NOT EXISTS idx_alerts_score ON alerts(score);
+            )
         """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_listings_seen_at ON listings(seen_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_listings_seller_id ON listings(seller_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_price_history_search_term ON price_history(search_term)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_price_history_seen_at ON price_history(seen_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_listing_id ON alerts(listing_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_alerted_at ON alerts(alerted_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_score ON alerts(score)")
     logger.info("Database initialized")
 
 
 def migrate():
     """Add new columns to existing tables if they don't exist."""
-    with db_conn() as conn:
-        cursor = conn.execute("PRAGMA table_info(listings)")
-        listing_cols = {row["name"] for row in cursor.fetchall()}
+    migrations = {
+        "listings": [
+            ("seller_type", "TEXT"),
+            ("status", "TEXT DEFAULT 'new'"),
+        ],
+        "alerts": [
+            ("location", "TEXT"),
+            ("images_count", "INTEGER DEFAULT 0"),
+            ("age_minutes", "REAL"),
+            ("title", "TEXT DEFAULT ''"),
+            ("url", "TEXT DEFAULT ''"),
+            ("price", "REAL DEFAULT 0"),
+            ("rolling_average", "REAL DEFAULT 0"),
+            ("price_delta_percent", "REAL DEFAULT 0"),
+        ],
+    }
 
-        migrations = {
-            "listings": [
-                ("seller_type", "TEXT"),
-                ("status", "TEXT DEFAULT 'new'"),
-            ],
-            "alerts": [
-                ("location", "TEXT"),
-                ("images_count", "INTEGER DEFAULT 0"),
-                ("age_minutes", "REAL"),
-                ("title", "TEXT DEFAULT ''"),
-                ("url", "TEXT DEFAULT ''"),
-                ("price", "REAL DEFAULT 0"),
-                ("rolling_average", "REAL DEFAULT 0"),
-                ("price_delta_percent", "REAL DEFAULT 0"),
-            ],
-        }
-
+    with db_conn() as cur:
         for table, columns in migrations.items():
-            cursor = conn.execute(f"PRAGMA table_info({table})")
-            existing = {row["name"] for row in cursor.fetchall()}
+            cur.execute(
+                """SELECT column_name FROM information_schema.columns
+                   WHERE table_name = %s AND table_schema = 'public'""",
+                (table,),
+            )
+            existing = {row["column_name"] for row in cur.fetchall()}
             for col_name, col_def in columns:
                 if col_name not in existing:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
+                    cur.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
                     logger.info(f"Migrated: added {col_name} to {table}")
 
 
 def seed_default_profiles():
-    with db_conn() as conn:
-        count = conn.execute("SELECT COUNT(*) FROM search_profiles").fetchone()[0]
+    with db_conn() as cur:
+        cur.execute("SELECT COUNT(*) AS cnt FROM search_profiles")
+        count = cur.fetchone()["cnt"]
         if count == 0:
-            conn.executemany(
-                "INSERT INTO search_profiles (name, query, active) VALUES (?, ?, 1)",
+            cur.executemany(
+                "INSERT INTO search_profiles (name, query, active) VALUES (%s, %s, 1)",
                 [
                     ("Nintendo Switch", "Nintendo Switch"),
                     ("Lego Technic", "Lego Technic"),
@@ -155,20 +156,19 @@ def seed_default_profiles():
 
 def upsert_listing(listing: dict) -> bool:
     """Returns True if this is a new listing."""
-    with db_conn() as conn:
-        existing = conn.execute(
-            "SELECT id FROM listings WHERE id = ?", (listing["id"],)
-        ).fetchone()
+    with db_conn() as cur:
+        cur.execute("SELECT id FROM listings WHERE id = %s", (listing["id"],))
+        existing = cur.fetchone()
         if existing:
-            conn.execute(
-                "UPDATE listings SET price=?, seen_at=? WHERE id=?",
+            cur.execute(
+                "UPDATE listings SET price=%s, seen_at=%s WHERE id=%s",
                 (listing["price"], datetime.utcnow(), listing["id"]),
             )
             return False
-        conn.execute(
+        cur.execute(
             """INSERT INTO listings
                (id, title, price, url, seller_id, seller_type, images_count, location, category, seen_at, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 listing["id"],
                 listing["title"],
@@ -187,42 +187,42 @@ def upsert_listing(listing: dict) -> bool:
 
 
 def add_price_history(search_term: str, price: float, listing_id: Optional[str] = None):
-    with db_conn() as conn:
-        conn.execute(
-            "INSERT INTO price_history (search_term, price, listing_id, seen_at) VALUES (?, ?, ?, ?)",
+    with db_conn() as cur:
+        cur.execute(
+            "INSERT INTO price_history (search_term, price, listing_id, seen_at) VALUES (%s, %s, %s, %s)",
             (search_term, price, listing_id, datetime.utcnow()),
         )
 
 
 def get_price_history(search_term: str, days: int = 30) -> List[dict]:
-    with db_conn() as conn:
-        rows = conn.execute(
+    with db_conn() as cur:
+        cur.execute(
             """SELECT price, seen_at FROM price_history
-               WHERE search_term = ?
-               AND seen_at >= datetime('now', ? || ' days')
+               WHERE search_term = %s
+               AND seen_at >= NOW() - INTERVAL '1 day' * %s
                ORDER BY seen_at ASC""",
-            (search_term, f"-{days}"),
-        ).fetchall()
-        return [dict(r) for r in rows]
+            (search_term, days),
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def was_recently_alerted(listing_id: str, cooldown_hours: int) -> bool:
-    with db_conn() as conn:
-        row = conn.execute(
-            """SELECT id FROM alerts WHERE listing_id = ?
-               AND alerted_at >= datetime('now', ? || ' hours')""",
-            (listing_id, f"-{cooldown_hours}"),
-        ).fetchone()
-        return row is not None
+    with db_conn() as cur:
+        cur.execute(
+            """SELECT id FROM alerts WHERE listing_id = %s
+               AND alerted_at >= NOW() - INTERVAL '1 hour' * %s""",
+            (listing_id, cooldown_hours),
+        )
+        return cur.fetchone() is not None
 
 
 def save_alert(alert: dict):
-    with db_conn() as conn:
-        conn.execute(
+    with db_conn() as cur:
+        cur.execute(
             """INSERT INTO alerts
                (listing_id, title, price, url, score, expected_profit, rolling_average,
                 price_delta_percent, location, images_count, age_minutes, alerted_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 alert["listing_id"],
                 alert["title"],
@@ -251,62 +251,61 @@ def get_alerts(
     filters = []
     params: list = []
     if min_score is not None:
-        filters.append("score >= ?")
+        filters.append("score >= %s")
         params.append(min_score)
     if date_from:
-        filters.append("alerted_at >= ?")
+        filters.append("alerted_at >= %s")
         params.append(date_from)
     if date_to:
-        filters.append("alerted_at <= ?")
+        filters.append("alerted_at <= %s")
         params.append(date_to)
     if user_action:
-        filters.append("user_action = ?")
+        filters.append("user_action = %s")
         params.append(user_action)
 
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
     params += [page_size, page * page_size]
 
-    with db_conn() as conn:
-        rows = conn.execute(
-            f"SELECT * FROM alerts {where} ORDER BY alerted_at DESC LIMIT ? OFFSET ?",
+    with db_conn() as cur:
+        cur.execute(
+            f"SELECT * FROM alerts {where} ORDER BY alerted_at DESC LIMIT %s OFFSET %s",
             params,
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def get_alert_by_id(alert_id: int) -> Optional[dict]:
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+    with db_conn() as cur:
+        cur.execute("SELECT * FROM alerts WHERE id = %s", (alert_id,))
+        row = cur.fetchone()
         return dict(row) if row else None
 
 
 def update_alert_action(alert_id: int, user_action: str):
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE alerts SET user_action = ? WHERE id = ?",
+    with db_conn() as cur:
+        cur.execute(
+            "UPDATE alerts SET user_action = %s WHERE id = %s",
             (user_action, alert_id),
         )
 
 
 def get_profiles() -> List[dict]:
-    with db_conn() as conn:
-        rows = conn.execute("SELECT * FROM search_profiles ORDER BY id").fetchall()
-        return [dict(r) for r in rows]
+    with db_conn() as cur:
+        cur.execute("SELECT * FROM search_profiles ORDER BY id")
+        return [dict(r) for r in cur.fetchall()]
 
 
 def get_active_profiles() -> List[dict]:
-    with db_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM search_profiles WHERE active = 1 ORDER BY id"
-        ).fetchall()
-        return [dict(r) for r in rows]
+    with db_conn() as cur:
+        cur.execute("SELECT * FROM search_profiles WHERE active = 1 ORDER BY id")
+        return [dict(r) for r in cur.fetchall()]
 
 
 def create_profile(profile: dict) -> int:
-    with db_conn() as conn:
-        cursor = conn.execute(
+    with db_conn() as cur:
+        cur.execute(
             """INSERT INTO search_profiles (name, query, category_id, max_price, min_price, active, custom_threshold)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (
                 profile["name"],
                 profile["query"],
@@ -317,7 +316,7 @@ def create_profile(profile: dict) -> int:
                 profile.get("custom_threshold"),
             ),
         )
-        return cursor.lastrowid
+        return cur.fetchone()["id"]
 
 
 def update_profile(profile_id: int, updates: dict):
@@ -325,7 +324,7 @@ def update_profile(profile_id: int, updates: dict):
     params = []
     for key in ("name", "query", "category_id", "max_price", "min_price", "active", "custom_threshold"):
         if key in updates:
-            fields.append(f"{key} = ?")
+            fields.append(f"{key} = %s")
             val = updates[key]
             if key == "active":
                 val = 1 if val else 0
@@ -333,78 +332,82 @@ def update_profile(profile_id: int, updates: dict):
     if not fields:
         return
     params.append(profile_id)
-    with db_conn() as conn:
-        conn.execute(
-            f"UPDATE search_profiles SET {', '.join(fields)} WHERE id = ?", params
+    with db_conn() as cur:
+        cur.execute(
+            f"UPDATE search_profiles SET {', '.join(fields)} WHERE id = %s", params
         )
 
 
 def delete_profile(profile_id: int):
-    with db_conn() as conn:
-        conn.execute("DELETE FROM search_profiles WHERE id = ?", (profile_id,))
+    with db_conn() as cur:
+        cur.execute("DELETE FROM search_profiles WHERE id = %s", (profile_id,))
 
 
 def get_blacklist() -> List[dict]:
-    with db_conn() as conn:
-        rows = conn.execute("SELECT * FROM blacklist ORDER BY added_at DESC").fetchall()
-        return [dict(r) for r in rows]
+    with db_conn() as cur:
+        cur.execute("SELECT * FROM blacklist ORDER BY added_at DESC")
+        return [dict(r) for r in cur.fetchall()]
 
 
 def is_blacklisted(seller_id: str) -> bool:
-    with db_conn() as conn:
-        row = conn.execute(
-            "SELECT seller_id FROM blacklist WHERE seller_id = ?", (seller_id,)
-        ).fetchone()
-        return row is not None
+    with db_conn() as cur:
+        cur.execute("SELECT seller_id FROM blacklist WHERE seller_id = %s", (seller_id,))
+        return cur.fetchone() is not None
 
 
 def add_to_blacklist(seller_id: str, reason: Optional[str] = None):
-    with db_conn() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO blacklist (seller_id, reason, added_at) VALUES (?, ?, ?)",
+    with db_conn() as cur:
+        cur.execute(
+            "INSERT INTO blacklist (seller_id, reason, added_at) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (seller_id, reason, datetime.utcnow()),
         )
 
 
 def remove_from_blacklist(seller_id: str):
-    with db_conn() as conn:
-        conn.execute("DELETE FROM blacklist WHERE seller_id = ?", (seller_id,))
+    with db_conn() as cur:
+        cur.execute("DELETE FROM blacklist WHERE seller_id = %s", (seller_id,))
 
 
 def get_seller_listing_count(seller_id: str) -> int:
-    with db_conn() as conn:
-        row = conn.execute(
-            """SELECT COUNT(*) FROM listings WHERE seller_id = ?
-               AND seen_at >= datetime('now', '-7 days')""",
+    with db_conn() as cur:
+        cur.execute(
+            """SELECT COUNT(*) AS cnt FROM listings WHERE seller_id = %s
+               AND seen_at >= NOW() - INTERVAL '7 days'""",
             (seller_id,),
-        ).fetchone()
-        return row[0] if row else 0
+        )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
 
 
 def get_stats() -> dict:
-    with db_conn() as conn:
-        today_seen = conn.execute(
-            "SELECT COUNT(*) FROM listings WHERE seen_at >= date('now')"
-        ).fetchone()[0]
-        today_alerts = conn.execute(
-            "SELECT COUNT(*) FROM alerts WHERE alerted_at >= date('now')"
-        ).fetchone()[0]
-        week_alerts = conn.execute(
-            "SELECT COUNT(*) FROM alerts WHERE alerted_at >= date('now', '-7 days')"
-        ).fetchone()[0]
-        total_alerts = conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
-        best_margin = conn.execute(
-            """SELECT MAX(expected_profit) FROM alerts WHERE alerted_at >= date('now')"""
-        ).fetchone()[0]
-        total_profit = conn.execute(
-            """SELECT COALESCE(SUM(expected_profit), 0) FROM alerts
-               WHERE user_action = 'interested'"""
-        ).fetchone()[0]
-        top_terms = conn.execute(
-            """SELECT search_term, COUNT(*) as cnt FROM price_history
-               WHERE seen_at >= date('now', '-7 days')
+    with db_conn() as cur:
+        cur.execute("SELECT COUNT(*) AS cnt FROM listings WHERE seen_at >= CURRENT_DATE")
+        today_seen = cur.fetchone()["cnt"]
+
+        cur.execute("SELECT COUNT(*) AS cnt FROM alerts WHERE alerted_at >= CURRENT_DATE")
+        today_alerts = cur.fetchone()["cnt"]
+
+        cur.execute("SELECT COUNT(*) AS cnt FROM alerts WHERE alerted_at >= CURRENT_DATE - INTERVAL '7 days'")
+        week_alerts = cur.fetchone()["cnt"]
+
+        cur.execute("SELECT COUNT(*) AS cnt FROM alerts")
+        total_alerts = cur.fetchone()["cnt"]
+
+        cur.execute("SELECT MAX(expected_profit) AS max_profit FROM alerts WHERE alerted_at >= CURRENT_DATE")
+        best_margin = cur.fetchone()["max_profit"]
+
+        cur.execute(
+            "SELECT COALESCE(SUM(expected_profit), 0) AS total_profit FROM alerts WHERE user_action = 'interested'"
+        )
+        total_profit = cur.fetchone()["total_profit"]
+
+        cur.execute(
+            """SELECT search_term, COUNT(*) AS cnt FROM price_history
+               WHERE seen_at >= CURRENT_DATE - INTERVAL '7 days'
                GROUP BY search_term ORDER BY cnt DESC LIMIT 5"""
-        ).fetchall()
+        )
+        top_terms = [dict(r) for r in cur.fetchall()]
+
         return {
             "today_seen": today_seen,
             "today_alerts": today_alerts,
@@ -412,5 +415,5 @@ def get_stats() -> dict:
             "total_alerts": total_alerts,
             "best_margin_today": best_margin,
             "total_profit_interested": total_profit,
-            "top_search_terms": [dict(r) for r in top_terms],
+            "top_search_terms": top_terms,
         }
