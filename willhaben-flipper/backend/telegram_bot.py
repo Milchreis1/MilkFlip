@@ -189,12 +189,16 @@ async def _handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         listing_id = data.split(":", 1)[1]
         alerts = database.get_alerts()
         rolling_avg = 0.0
-        search_term = listing_id
+        search_term = None
         for a in alerts:
             if a["listing_id"] == listing_id:
                 rolling_avg = a.get("rolling_average", 0)
                 break
-        history = database.get_price_history(search_term, 30)
+        history = (
+            database.get_price_history(search_term, 30)
+            if search_term
+            else database.get_price_history_by_listing(listing_id)
+        )
         chart = _text_price_chart(history, rolling_avg)
         await query.message.reply_text(f"```\n{chart}\n```", parse_mode="Markdown")
 

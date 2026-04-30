@@ -17,7 +17,7 @@ def weighted_rolling_average(search_term: str, days: int) -> Optional[float]:
     if not history:
         return None
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     total_weight = 0.0
     weighted_sum = 0.0
 
@@ -28,6 +28,8 @@ def weighted_rolling_average(search_term: str, days: int) -> Optional[float]:
                 seen_at = datetime.fromisoformat(seen_at)
             except ValueError:
                 seen_at = now
+        if seen_at.tzinfo is None:
+            seen_at = seen_at.replace(tzinfo=timezone.utc)
         age_days = max((now - seen_at).total_seconds() / 86400, 0.001)
         weight = 1.0 / age_days
         weighted_sum += entry["price"] * weight

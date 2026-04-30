@@ -19,8 +19,8 @@ app = FastAPI(title="Willhaben Flipper API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -82,7 +82,7 @@ def create_profile(profile: SearchProfile):
 
 @app.patch("/api/profiles/{profile_id}")
 def update_profile(profile_id: int, profile: SearchProfile):
-    updates = profile.model_dump(exclude_none=True, exclude={"id"})
+    updates = profile.model_dump(exclude_unset=True, exclude={"id"})
     database.update_profile(profile_id, updates)
     return {"ok": True}
 

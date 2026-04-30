@@ -7,7 +7,6 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ReferenceDot,
   ResponsiveContainer,
 } from "recharts";
 import { api, PriceHistoryEntry, SearchProfile } from "../api";

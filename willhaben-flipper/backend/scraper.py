@@ -133,6 +133,7 @@ def _parse_listing(item: dict) -> Optional[dict]:
             "location": location,
             "category": item.get("categoryPath") or attrs.get("CATEGORY"),
             "age_minutes": age_minutes,
+            "seen_at": datetime.now(timezone.utc),
         }
     except Exception as e:
         logger.error(f"Failed to parse listing: {e}", exc_info=True)

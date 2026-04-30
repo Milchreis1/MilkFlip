@@ -1,7 +1,7 @@
 import psycopg2
 import psycopg2.extras
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from contextlib import contextmanager
 
@@ -162,7 +162,7 @@ def upsert_listing(listing: dict) -> bool:
         if existing:
             cur.execute(
                 "UPDATE listings SET price=%s, seen_at=%s WHERE id=%s",
-                (listing["price"], datetime.utcnow(), listing["id"]),
+                (listing["price"], datetime.now(timezone.utc), listing["id"]),
             )
             return False
         cur.execute(
@@ -179,7 +179,7 @@ def upsert_listing(listing: dict) -> bool:
                 listing.get("images_count", 0),
                 listing.get("location"),
                 listing.get("category"),
-                datetime.utcnow(),
+                datetime.now(timezone.utc),
                 "new",
             ),
         )
@@ -190,7 +190,7 @@ def add_price_history(search_term: str, price: float, listing_id: Optional[str] 
     with db_conn() as cur:
         cur.execute(
             "INSERT INTO price_history (search_term, price, listing_id, seen_at) VALUES (%s, %s, %s, %s)",
-            (search_term, price, listing_id, datetime.utcnow()),
+            (search_term, price, listing_id, datetime.now(timezone.utc)),
         )
 
 
@@ -202,6 +202,17 @@ def get_price_history(search_term: str, days: int = 30) -> List[dict]:
                AND seen_at >= NOW() - INTERVAL '1 day' * %s
                ORDER BY seen_at ASC""",
             (search_term, days),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def get_price_history_by_listing(listing_id: str) -> List[dict]:
+    with db_conn() as cur:
+        cur.execute(
+            """SELECT price, seen_at FROM price_history
+               WHERE listing_id = %s
+               ORDER BY seen_at ASC""",
+            (listing_id,),
         )
         return [dict(r) for r in cur.fetchall()]
 
@@ -235,7 +246,7 @@ def save_alert(alert: dict):
                 alert.get("location"),
                 alert.get("images_count", 0),
                 alert.get("age_minutes"),
-                datetime.utcnow(),
+                datetime.now(timezone.utc),
             ),
         )
 
@@ -359,7 +370,7 @@ def add_to_blacklist(seller_id: str, reason: Optional[str] = None):
     with db_conn() as cur:
         cur.execute(
             "INSERT INTO blacklist (seller_id, reason, added_at) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-            (seller_id, reason, datetime.utcnow()),
+            (seller_id, reason, datetime.now(timezone.utc)),
         )
 
 
