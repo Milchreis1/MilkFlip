@@ -178,7 +178,12 @@ async def main():
             return
         await tg_app.initialize()
         await tg_app.start()
-        await tg_app.updater.start_polling(allowed_updates=["message", "callback_query"])
+        # Drop any stale session left by a previous container instance.
+        await tg_app.bot.delete_webhook(drop_pending_updates=True)
+        await tg_app.updater.start_polling(
+            allowed_updates=["message", "callback_query"],
+            drop_pending_updates=True,
+        )
         logger.info("Telegram bot started")
         while True:
             await asyncio.sleep(3600)

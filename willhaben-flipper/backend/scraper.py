@@ -2,10 +2,10 @@ import asyncio
 import json as _json
 import logging
 import random
+import re
 import requests as _requests
 from datetime import datetime, timezone
 from typing import List, Optional
-from urllib.parse import quote
 
 import aiohttp
 
@@ -14,19 +14,23 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = (
-    "https://www.willhaben.at/iad/search/atz/seo"
-    "/kaufen-und-verkaufen/marktplatz"
-)
+# HTML search page — Willhaben is Next.js; listings are in __NEXT_DATA__ JSON.
+SEARCH_URL = "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz"
 
 HEADERS = {
-    "Accept": "application/json",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "de-AT,de;q=0.9,en;q=0.8",
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
 }
+
+_NEXT_DATA_RE = re.compile(
+    r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+    re.DOTALL,
+)
 
 _semaphore: Optional[asyncio.Semaphore] = None
 
@@ -173,25 +177,25 @@ async def _fetch_page(
 ) -> List[dict]:
     global _raw_logged
 
-    encoded_keyword = quote(keyword, safe="")
-    parts: list[str] = [f"keyword={encoded_keyword}", f"rows=30", f"page={page}"]
+    # Willhaben HTML pages are 1-indexed; page=0 here → page=1 in URL.
+    params: dict = {"keyword": keyword, "page": page + 1}
     if max_price is not None:
-        parts.append(f"PRICE_TO={int(max_price)}")
+        params["PRICE_TO"] = int(max_price)
     if min_price is not None:
-        parts.append(f"PRICE_FROM={int(min_price)}")
+        params["PRICE_FROM"] = int(min_price)
     if category_id:
-        parts.append(f"areaId={category_id}")
+        params["areaId"] = category_id
 
-    full_url = f"{BASE_URL}?{'&'.join(parts)}"
-    logger.info(f"GET {full_url}")
+    logger.info(f"GET {SEARCH_URL}?keyword={keyword}&page={page + 1}")
 
     async with get_semaphore():
         for attempt in range(3):
             try:
                 async with session.get(
-                    full_url,
+                    SEARCH_URL,
+                    params=params,
                     headers=HEADERS,
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    timeout=aiohttp.ClientTimeout(total=20),
                 ) as resp:
                     logger.info(
                         f"HTTP {resp.status} | '{keyword}' page {page} "
@@ -200,64 +204,60 @@ async def _fetch_page(
 
                     if resp.status == 429:
                         wait = 60 * (attempt + 1)
-                        logger.warning(
-                            f"Rate limited (429), waiting {wait}s "
-                            f"(attempt {attempt + 1}/3)"
-                        )
+                        logger.warning(f"Rate limited (429), waiting {wait}s")
                         await asyncio.sleep(wait)
                         continue
 
                     if resp.status == 403:
-                        logger.critical(
-                            f"HTTP 403 from Willhaben — "
-                            f"möglicherweise geblockt, User-Agent prüfen"
-                        )
+                        logger.critical("HTTP 403 — möglicherweise geblockt")
                         return []
 
                     if resp.status != 200:
                         text = await resp.text()
                         logger.error(
-                            f"HTTP {resp.status} | URL: {full_url} | "
-                            f"body: {text[:400]}"
+                            f"HTTP {resp.status} | '{keyword}' | body[:200]: {text[:200]}"
+                        )
+                        return []
+
+                    html = await resp.text()
+
+                    match = _NEXT_DATA_RE.search(html)
+                    if not match:
+                        logger.error(
+                            f"__NEXT_DATA__ not found for '{keyword}' page {page}. "
+                            f"HTML length: {len(html)}"
                         )
                         return []
 
                     try:
-                        data = await resp.json(content_type=None)
+                        data = _json.loads(match.group(1))
                     except Exception as e:
-                        text = await resp.text()
-                        logger.error(
-                            f"JSON parse error for '{keyword}': {e} | "
-                            f"snippet: {text[:300]}"
-                        )
+                        logger.error(f"__NEXT_DATA__ JSON parse error for '{keyword}': {e}")
                         return []
 
+                    # Navigate: props.pageProps.searchResult.advertSummaryList.advertSummary
+                    page_props = data.get("props", {}).get("pageProps", {})
+                    search_result = page_props.get("searchResult") or {}
                     ads = (
-                        (data.get("advertSummaryList") or {}).get("advertSummary")
-                        or data.get("ads")
-                        or data.get("items")
+                        (search_result.get("advertSummaryList") or {}).get("advertSummary")
                         or []
                     )
 
                     if not isinstance(ads, list):
                         logger.error(
-                            f"Unexpected response shape for '{keyword}'. "
-                            f"Top-level keys: {list(data.keys())}"
+                            f"Unexpected __NEXT_DATA__ shape for '{keyword}'. "
+                            f"pageProps keys: {list(page_props.keys())}"
                         )
                         return []
 
                     if ads and not _raw_logged:
                         _raw_logged = True
                         logger.info(
-                            f"RAW first item sample for '{keyword}':\n"
+                            f"RAW first item for '{keyword}':\n"
                             + _json.dumps(ads[0], ensure_ascii=False, indent=2)
                         )
 
-                    listings = [
-                        p
-                        for ad in ads
-                        if (p := _parse_listing(ad)) is not None
-                    ]
+                    listings = [p for ad in ads if (p := _parse_listing(ad)) is not None]
                     logger.info(
                         f"Parsed {len(listings)}/{len(ads)} listings "
                         f"for '{keyword}' page {page}"
