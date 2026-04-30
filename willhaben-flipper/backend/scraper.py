@@ -4,6 +4,7 @@ import logging
 import random
 from datetime import datetime, timezone
 from typing import List, Optional
+from urllib.parse import quote
 
 import aiohttp
 
@@ -148,23 +149,23 @@ async def _fetch_page(
 ) -> List[dict]:
     global _raw_logged
 
-    params: dict = {"keyword": keyword, "rows": 30, "page": page}
+    encoded_keyword = quote(keyword)
+    parts: list[str] = [f"keyword={encoded_keyword}", f"rows=30", f"page={page}"]
     if max_price is not None:
-        params["PRICE_TO"] = int(max_price)
+        parts.append(f"PRICE_TO={int(max_price)}")
     if min_price is not None:
-        params["PRICE_FROM"] = int(min_price)
+        parts.append(f"PRICE_FROM={int(min_price)}")
     if category_id:
-        params["areaId"] = category_id
+        parts.append(f"areaId={category_id}")
 
-    qs = "&".join(f"{k}={v}" for k, v in params.items())
-    logger.info(f"GET {BASE_URL}?{qs}")
+    full_url = f"{BASE_URL}?{'&'.join(parts)}"
+    logger.info(f"GET {full_url}")
 
     async with get_semaphore():
         for attempt in range(3):
             try:
                 async with session.get(
-                    BASE_URL,
-                    params=params,
+                    full_url,
                     headers=HEADERS,
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
@@ -192,7 +193,7 @@ async def _fetch_page(
                     if resp.status != 200:
                         text = await resp.text()
                         logger.error(
-                            f"HTTP {resp.status} | URL: {BASE_URL}?{qs} | "
+                            f"HTTP {resp.status} | URL: {full_url} | "
                             f"body: {text[:400]}"
                         )
                         return []
