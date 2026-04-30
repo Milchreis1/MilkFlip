@@ -54,36 +54,78 @@ export default function PriceChart() {
     });
   }, [selected, days]);
 
-  return (
-    <div className="max-w-4xl mx-auto">
-      <h2 className="text-xl font-bold mb-6">Preishistorie</h2>
+  const btnStyle = (active: boolean): React.CSSProperties => ({
+    fontSize: "12px",
+    fontWeight: 500,
+    padding: "6px 14px",
+    borderRadius: "8px",
+    border: active ? "none" : "1px solid rgba(84,101,255,0.2)",
+    background: active ? "#5465ff" : "transparent",
+    color: active ? "#f0f4ff" : "#8a97b0",
+    cursor: "pointer",
+    transition: "all 0.15s ease",
+    fontFamily: "inherit",
+    outline: "none",
+  });
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6 flex flex-wrap gap-4 items-center">
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400">Suchprofil</label>
+  return (
+    <div style={{ maxWidth: "900px", margin: "0 auto" }}>
+      <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#f0f4ff", marginBottom: "24px" }}>
+        Preishistorie
+      </h2>
+
+      {/* Controls */}
+      <div
+        style={{
+          background: "#151b25",
+          border: "1px solid rgba(84,101,255,0.15)",
+          borderRadius: "12px",
+          padding: "14px 18px",
+          marginBottom: "16px",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "16px",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <label style={{ fontSize: "12px", color: "#8a97b0" }}>Suchprofil</label>
           <select
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
-            className="bg-gray-800 text-white text-sm rounded px-2 py-1 border border-gray-700"
+            style={{
+              background: "#19212e",
+              color: "#f0f4ff",
+              fontSize: "12px",
+              border: "1px solid rgba(84,101,255,0.2)",
+              borderRadius: "8px",
+              padding: "6px 10px",
+              outline: "none",
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
           >
             {profiles.map((p) => (
-              <option key={p.id} value={p.query}>
+              <option key={p.id} value={p.query} style={{ background: "#19212e" }}>
                 {p.name}
               </option>
             ))}
           </select>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400">Zeitraum</label>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <label style={{ fontSize: "12px", color: "#8a97b0", marginRight: "4px" }}>Zeitraum</label>
           {[7, 14, 30, 90].map((d) => (
             <button
               key={d}
               onClick={() => setDays(d)}
-              className={`text-xs px-3 py-1 rounded-lg ${
-                days === d
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:text-white"
-              }`}
+              style={btnStyle(days === d)}
+              onMouseEnter={(e) => {
+                if (days !== d) e.currentTarget.style.color = "#f0f4ff";
+              }}
+              onMouseLeave={(e) => {
+                if (days !== d) e.currentTarget.style.color = "#8a97b0";
+              }}
             >
               {d}T
             </button>
@@ -91,53 +133,72 @@ export default function PriceChart() {
         </div>
       </div>
 
+      {/* Loading */}
       {loading && (
-        <div className="text-center py-16 text-gray-500">Lade Daten…</div>
-      )}
-
-      {!loading && data.length === 0 && (
-        <div className="text-center py-16 text-gray-500">
-          Noch keine Preisdaten für „{selected}". Warte auf den ersten Scrape-Zyklus.
+        <div style={{ textAlign: "center", padding: "64px 0", color: "#4a5568" }}>
+          <div className="pulse" style={{ fontSize: "13px" }}>Lade Daten…</div>
         </div>
       )}
 
+      {/* Empty */}
+      {!loading && data.length === 0 && (
+        <div style={{ textAlign: "center", padding: "64px 0" }}>
+          <p style={{ fontSize: "36px", marginBottom: "14px" }}>📈</p>
+          <p style={{ fontSize: "13px", color: "#4a5568" }}>
+            Noch keine Preisdaten für „{selected}". Warte auf den ersten Scrape-Zyklus.
+          </p>
+        </div>
+      )}
+
+      {/* Chart */}
       {!loading && data.length > 0 && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div
+          style={{
+            background: "#151b25",
+            border: "1px solid rgba(84,101,255,0.15)",
+            borderRadius: "12px",
+            padding: "20px 16px 12px",
+          }}
+        >
           <ResponsiveContainer width="100%" height={380}>
             <LineChart data={data} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,101,255,0.08)" />
               <XAxis
                 dataKey="date"
-                tick={{ fontSize: 11, fill: "#9ca3af" }}
+                tick={{ fontSize: 11, fill: "#4a5568" }}
                 tickLine={false}
+                axisLine={{ stroke: "rgba(84,101,255,0.1)" }}
                 interval="preserveStartEnd"
               />
               <YAxis
-                tick={{ fontSize: 11, fill: "#9ca3af" }}
+                tick={{ fontSize: 11, fill: "#4a5568" }}
                 tickLine={false}
+                axisLine={false}
                 tickFormatter={(v) => `${v}€`}
-                width={60}
+                width={58}
               />
               <Tooltip
                 contentStyle={{
-                  background: "#1f2937",
-                  border: "1px solid #374151",
-                  borderRadius: 8,
-                  color: "#f9fafb",
+                  background: "#19212e",
+                  border: "1px solid rgba(84,101,255,0.2)",
+                  borderRadius: "10px",
+                  color: "#f0f4ff",
                   fontSize: 12,
+                  fontFamily: "Satoshi, Inter, sans-serif",
                 }}
                 formatter={(v: number) => [`${v}€`]}
+                labelStyle={{ color: "#8a97b0", marginBottom: "4px" }}
               />
               <Legend
-                wrapperStyle={{ fontSize: 12, color: "#9ca3af" }}
+                wrapperStyle={{ fontSize: 12, color: "#8a97b0", paddingTop: "12px" }}
               />
               <Line
                 type="monotone"
                 dataKey="price"
                 name="Preis"
-                stroke="#60a5fa"
+                stroke="#5465ff"
                 dot={false}
-                strokeWidth={1.5}
+                strokeWidth={2}
               />
               <Line
                 type="monotone"

@@ -12,6 +12,19 @@ const EMPTY: Omit<SearchProfile, "id"> = {
   custom_threshold: null,
 };
 
+const inputStyle: React.CSSProperties = {
+  background: "#19212e",
+  border: "1px solid rgba(84,101,255,0.2)",
+  borderRadius: "8px",
+  padding: "8px 12px",
+  fontSize: "13px",
+  color: "#f0f4ff",
+  width: "100%",
+  outline: "none",
+  transition: "border-color 0.2s ease",
+  fontFamily: "inherit",
+};
+
 export default function SearchProfiles() {
   const [profiles, setProfiles] = useState<SearchProfile[]>([]);
   const [form, setForm] = useState<Omit<SearchProfile, "id">>(EMPTY);
@@ -19,13 +32,12 @@ export default function SearchProfiles() {
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const load = () =>
-    api.profiles.list().then((res) => setProfiles(res.profiles));
+  const load = () => api.profiles.list().then((res) => setProfiles(res.profiles));
 
   useEffect(() => { load(); }, []);
 
   const handleToggle = async (p: SearchProfile) => {
-    await api.profiles.update(p.id!, { ...p, active: !p.active });
+    await api.profiles.update(p.id!, { active: !p.active });
     load();
   };
 
@@ -50,12 +62,29 @@ export default function SearchProfiles() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold">Suchprofile</h2>
+    <div style={{ maxWidth: "680px", margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>
+        <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#f0f4ff" }}>Suchprofile</h2>
         <button
           onClick={() => setShowForm((v) => !v)}
-          className="flex items-center gap-2 text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "7px",
+            fontSize: "13px",
+            fontWeight: 600,
+            color: "#f0f4ff",
+            background: "#5465ff",
+            border: "none",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            transition: "background 0.2s ease",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            outline: "none",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "#788bff")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#5465ff")}
         >
           <Plus size={15} /> Neu
         </button>
@@ -64,82 +93,97 @@ export default function SearchProfiles() {
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-6 flex flex-col gap-4"
+          style={{
+            background: "#151b25",
+            border: "1px solid rgba(84,101,255,0.2)",
+            borderRadius: "12px",
+            padding: "20px",
+            marginBottom: "20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px",
+          }}
         >
-          <h3 className="text-sm font-semibold text-gray-300">Neues Profil</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-400">Name *</label>
-              <input
-                required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                placeholder="Nintendo Switch"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-400">Suchbegriff *</label>
-              <input
-                required
-                value={form.query}
-                onChange={(e) => setForm({ ...form, query: e.target.value })}
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                placeholder="Nintendo Switch OLED"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-400">Min Preis (€)</label>
-              <input
-                type="number"
-                value={form.min_price ?? ""}
-                onChange={(e) =>
-                  setForm({ ...form, min_price: e.target.value ? Number(e.target.value) : null })
-                }
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                placeholder="0"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-400">Max Preis (€)</label>
-              <input
-                type="number"
-                value={form.max_price ?? ""}
-                onChange={(e) =>
-                  setForm({ ...form, max_price: e.target.value ? Number(e.target.value) : null })
-                }
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                placeholder="500"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-400">Threshold % (optional)</label>
-              <input
-                type="number"
-                value={form.custom_threshold ?? ""}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    custom_threshold: e.target.value ? Number(e.target.value) : null,
-                  })
-                }
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                placeholder="35"
-              />
-            </div>
+          <p style={{ fontSize: "13px", fontWeight: 600, color: "#8a97b0" }}>Neues Profil</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            {[
+              { label: "Name *", key: "name", placeholder: "Nintendo Switch" },
+              { label: "Suchbegriff *", key: "query", placeholder: "Nintendo Switch OLED" },
+            ].map(({ label, key, placeholder }) => (
+              <div key={key} style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                <label style={{ fontSize: "11px", fontWeight: 500, color: "#8a97b0" }}>{label}</label>
+                <input
+                  required={key === "name" || key === "query"}
+                  value={(form as Record<string, unknown>)[key] as string}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  placeholder={placeholder}
+                  style={inputStyle}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "#5465ff")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(84,101,255,0.2)")}
+                />
+              </div>
+            ))}
+            {[
+              { label: "Min Preis (€)", key: "min_price", placeholder: "0" },
+              { label: "Max Preis (€)", key: "max_price", placeholder: "500" },
+              { label: "Threshold % (optional)", key: "custom_threshold", placeholder: "35" },
+            ].map(({ label, key, placeholder }) => (
+              <div key={key} style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                <label style={{ fontSize: "11px", fontWeight: 500, color: "#8a97b0" }}>{label}</label>
+                <input
+                  type="number"
+                  value={(form as Record<string, unknown>)[key] as string ?? ""}
+                  onChange={(e) =>
+                    setForm({ ...form, [key]: e.target.value ? Number(e.target.value) : null })
+                  }
+                  placeholder={placeholder}
+                  style={inputStyle}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "#5465ff")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(84,101,255,0.2)")}
+                />
+              </div>
+            ))}
           </div>
-          <div className="flex gap-2 justify-end">
+          <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
             <button
               type="button"
               onClick={() => setShowForm(false)}
-              className="text-sm text-gray-400 hover:text-white px-4 py-2 rounded-lg bg-gray-800"
+              style={{
+                fontSize: "13px",
+                fontWeight: 500,
+                color: "#8a97b0",
+                background: "transparent",
+                border: "1px solid rgba(84,101,255,0.2)",
+                padding: "8px 16px",
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                outline: "none",
+                transition: "all 0.2s ease",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "#f0f4ff"; e.currentTarget.style.borderColor = "rgba(84,101,255,0.4)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "#8a97b0"; e.currentTarget.style.borderColor = "rgba(84,101,255,0.2)"; }}
             >
               Abbrechen
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+              style={{
+                fontSize: "13px",
+                fontWeight: 600,
+                color: "#f0f4ff",
+                background: saving ? "#4a5568" : "#5465ff",
+                border: "none",
+                padding: "8px 18px",
+                borderRadius: "8px",
+                cursor: saving ? "default" : "pointer",
+                fontFamily: "inherit",
+                outline: "none",
+                transition: "background 0.2s ease",
+              }}
+              onMouseEnter={(e) => { if (!saving) e.currentTarget.style.background = "#788bff"; }}
+              onMouseLeave={(e) => { if (!saving) e.currentTarget.style.background = "#5465ff"; }}
             >
               {saving ? "Speichern…" : "Speichern"}
             </button>
@@ -147,47 +191,96 @@ export default function SearchProfiles() {
         </form>
       )}
 
-      <div className="flex flex-col gap-3">
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
         {profiles.map((p) => (
           <div
             key={p.id}
-            className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-4"
+            style={{
+              background: "#151b25",
+              border: "1px solid rgba(84,101,255,0.15)",
+              borderRadius: "12px",
+              padding: "14px 16px",
+              display: "flex",
+              alignItems: "center",
+              gap: "14px",
+              transition: "border-color 0.2s ease",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(84,101,255,0.3)")}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(84,101,255,0.15)")}
           >
             <button
               onClick={() => handleToggle(p)}
-              className={p.active ? "text-green-400" : "text-gray-600"}
+              style={{
+                color: p.active ? "#22d3a5" : "#4a5568",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                padding: 0,
+                transition: "color 0.15s ease",
+                flexShrink: 0,
+              }}
               title={p.active ? "Deaktivieren" : "Aktivieren"}
             >
               {p.active ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
             </button>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-white">{p.name}</p>
-              <p className="text-xs text-gray-400">
+
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: "14px", fontWeight: 600, color: "#f0f4ff" }}>{p.name}</p>
+              <p style={{ fontSize: "12px", color: "#4a5568", marginTop: "2px" }}>
                 „{p.query}"
                 {p.min_price && ` · ab ${p.min_price}€`}
                 {p.max_price && ` · bis ${p.max_price}€`}
                 {p.custom_threshold && ` · Threshold ${p.custom_threshold}%`}
               </p>
             </div>
+
             <span
-              className={`text-xs px-2 py-0.5 rounded-full ${
-                p.active ? "bg-green-900 text-green-400" : "bg-gray-800 text-gray-500"
-              }`}
+              style={{
+                fontSize: "11px",
+                fontWeight: 500,
+                padding: "3px 10px",
+                borderRadius: "20px",
+                background: p.active ? "rgba(34,211,165,0.1)" : "rgba(74,85,104,0.15)",
+                color: p.active ? "#22d3a5" : "#4a5568",
+                flexShrink: 0,
+              }}
             >
               {p.active ? "Aktiv" : "Inaktiv"}
             </span>
+
             {confirmDelete === p.id ? (
-              <div className="flex gap-2 items-center">
-                <span className="text-xs text-red-400">Löschen?</span>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center", flexShrink: 0 }}>
+                <span style={{ fontSize: "12px", color: "#ef4444" }}>Löschen?</span>
                 <button
                   onClick={() => handleDelete(p.id!)}
-                  className="text-xs bg-red-700 text-white px-2 py-1 rounded"
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    color: "#f0f4ff",
+                    background: "#ef4444",
+                    border: "none",
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
                 >
                   Ja
                 </button>
                 <button
                   onClick={() => setConfirmDelete(null)}
-                  className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded"
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 500,
+                    color: "#8a97b0",
+                    background: "#19212e",
+                    border: "none",
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
                 >
                   Nein
                 </button>
@@ -195,15 +288,30 @@ export default function SearchProfiles() {
             ) : (
               <button
                 onClick={() => setConfirmDelete(p.id!)}
-                className="text-gray-600 hover:text-red-400 transition-colors"
+                style={{
+                  color: "#4a5568",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  padding: "2px",
+                  transition: "color 0.15s ease",
+                  flexShrink: 0,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "#4a5568")}
               >
                 <Trash2 size={16} />
               </button>
             )}
           </div>
         ))}
+
         {profiles.length === 0 && (
-          <p className="text-center py-12 text-gray-500">Noch keine Profile.</p>
+          <div style={{ textAlign: "center", padding: "48px 0" }}>
+            <p style={{ fontSize: "32px", marginBottom: "12px" }}>🔍</p>
+            <p style={{ fontSize: "13px", color: "#4a5568" }}>Noch keine Profile. Erstelle dein erstes Suchprofil.</p>
+          </div>
         )}
       </div>
     </div>

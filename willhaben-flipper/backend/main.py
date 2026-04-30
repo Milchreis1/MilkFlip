@@ -87,20 +87,6 @@ async def scrape_job():
                 if scored is None:
                     continue
 
-                # Verify the listing still exists on Willhaben before alerting.
-                live = await scraper.verify_url(scored.listing.url)
-                if live is False:
-                    database.mark_listing_inactive(scored.listing.id)
-                    logger.info(
-                        f"Skipped alert — listing gone (404): '{scored.listing.title}'"
-                    )
-                    continue
-                if live is None:
-                    logger.warning(
-                        f"Skipped alert — URL check failed (unknown): '{scored.listing.title}'"
-                    )
-                    continue
-
                 alert_dict = {
                     "listing_id": scored.listing.id,
                     "title": scored.listing.title,

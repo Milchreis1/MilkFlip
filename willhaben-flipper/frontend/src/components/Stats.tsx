@@ -6,21 +6,43 @@ function MetricCard({
   label,
   value,
   icon: Icon,
-  color,
+  accent,
 }: {
   label: string;
   value: string;
   icon: LucideIcon;
-  color: string;
+  accent: string;
 }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex items-center gap-4">
-      <div className={`${color} rounded-lg p-2.5`}>
-        <Icon size={20} className="text-white" />
+    <div
+      style={{
+        background: "#19212e",
+        border: "1px solid rgba(84,101,255,0.15)",
+        borderRadius: "12px",
+        padding: "20px",
+        display: "flex",
+        alignItems: "center",
+        gap: "16px",
+      }}
+    >
+      <div
+        style={{
+          background: `${accent}18`,
+          borderRadius: "10px",
+          padding: "10px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <Icon size={20} color={accent} />
       </div>
       <div>
-        <p className="text-2xl font-bold text-white">{value}</p>
-        <p className="text-xs text-gray-400">{label}</p>
+        <p style={{ fontSize: "26px", fontWeight: 700, color: "#f0f4ff", lineHeight: 1 }}>
+          {value}
+        </p>
+        <p style={{ fontSize: "12px", color: "#8a97b0", marginTop: "5px" }}>{label}</p>
       </div>
     </div>
   );
@@ -31,79 +53,112 @@ export default function Stats() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.stats.get().then((s) => { setStats(s); setLoading(false); });
+    api.stats.get().then((s) => {
+      setStats(s);
+      setLoading(false);
+    });
   }, []);
 
   if (loading) {
-    return <div className="text-center py-16 text-gray-500">Lade Stats…</div>;
+    return (
+      <div style={{ textAlign: "center", padding: "64px 0", color: "#4a5568" }}>
+        <div className="pulse" style={{ fontSize: "13px" }}>Lade Stats…</div>
+      </div>
+    );
   }
   if (!stats) return null;
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <h2 className="text-xl font-bold mb-6">Statistiken</h2>
+    <div style={{ maxWidth: "720px", margin: "0 auto" }}>
+      <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#f0f4ff", marginBottom: "24px" }}>
+        Statistiken
+      </h2>
 
-      <div className="grid grid-cols-2 gap-4 mb-8">
-        <MetricCard
-          label="Heute gesehen"
-          value={stats.today_seen.toLocaleString()}
-          icon={Eye}
-          color="bg-blue-600"
-        />
-        <MetricCard
-          label="Heute Alerts"
-          value={stats.today_alerts.toLocaleString()}
-          icon={Bell}
-          color="bg-yellow-600"
-        />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "24px" }}>
+        <MetricCard label="Heute gesehen" value={stats.today_seen.toLocaleString()} icon={Eye} accent="#5465ff" />
+        <MetricCard label="Heute Alerts" value={stats.today_alerts.toLocaleString()} icon={Bell} accent="#f59e0b" />
         <MetricCard
           label="Beste Marge heute"
           value={stats.best_margin_today != null ? `${stats.best_margin_today.toFixed(0)}€` : "—"}
           icon={TrendingUp}
-          color="bg-green-600"
+          accent="#22d3a5"
         />
         <MetricCard
           label="Gesamtgewinn (Interessiert)"
           value={`${stats.total_profit_interested.toFixed(0)}€`}
           icon={DollarSign}
-          color="bg-purple-600"
+          accent="#788bff"
         />
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-800">
-          <h3 className="text-sm font-semibold text-gray-300">
+      <div
+        style={{
+          background: "#151b25",
+          border: "1px solid rgba(84,101,255,0.15)",
+          borderRadius: "12px",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(84,101,255,0.08)" }}>
+          <h3 style={{ fontSize: "13px", fontWeight: 600, color: "#8a97b0" }}>
             Top Suchbegriffe (letzte 7 Tage)
           </h3>
         </div>
-        <table className="w-full text-sm">
+
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
           <thead>
-            <tr className="text-xs text-gray-500 border-b border-gray-800">
-              <th className="text-left px-5 py-3">#</th>
-              <th className="text-left px-5 py-3">Suchbegriff</th>
-              <th className="text-right px-5 py-3">Preise gesammelt</th>
+            <tr style={{ borderBottom: "1px solid rgba(84,101,255,0.08)" }}>
+              {["#", "Suchbegriff", "Preise"].map((h, i) => (
+                <th
+                  key={h}
+                  style={{
+                    textAlign: i === 2 ? "right" : "left",
+                    padding: "10px 20px",
+                    fontSize: "11px",
+                    fontWeight: 500,
+                    color: "#4a5568",
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {stats.top_search_terms.map((t, i) => (
-              <tr key={t.search_term} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                <td className="px-5 py-3 text-gray-500">{i + 1}</td>
-                <td className="px-5 py-3 font-medium text-white">{t.search_term}</td>
-                <td className="px-5 py-3 text-right text-gray-400">{t.cnt}</td>
+              <tr
+                key={t.search_term}
+                style={{ borderBottom: "1px solid rgba(84,101,255,0.06)", transition: "background 0.15s ease" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(84,101,255,0.05)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <td style={{ padding: "12px 20px", color: "#4a5568" }}>{i + 1}</td>
+                <td style={{ padding: "12px 20px", fontWeight: 500, color: "#f0f4ff" }}>{t.search_term}</td>
+                <td style={{ padding: "12px 20px", textAlign: "right", color: "#8a97b0" }}>{t.cnt}</td>
               </tr>
             ))}
             {stats.top_search_terms.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-5 py-8 text-center text-gray-600">
+                <td colSpan={3} style={{ padding: "36px", textAlign: "center", color: "#4a5568" }}>
                   Noch keine Daten
                 </td>
               </tr>
             )}
           </tbody>
         </table>
-        <div className="px-5 py-3 border-t border-gray-800 flex gap-6 text-xs text-gray-500">
-          <span>Gesamt Alerts: {stats.total_alerts}</span>
-          <span>Diese Woche: {stats.week_alerts}</span>
+
+        <div
+          style={{
+            padding: "12px 20px",
+            borderTop: "1px solid rgba(84,101,255,0.08)",
+            display: "flex",
+            gap: "20px",
+            fontSize: "12px",
+            color: "#4a5568",
+          }}
+        >
+          <span>Gesamt Alerts: <span style={{ color: "#8a97b0", fontWeight: 500 }}>{stats.total_alerts}</span></span>
+          <span>Diese Woche: <span style={{ color: "#8a97b0", fontWeight: 500 }}>{stats.week_alerts}</span></span>
         </div>
       </div>
     </div>

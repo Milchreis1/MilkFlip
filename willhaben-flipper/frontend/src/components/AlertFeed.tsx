@@ -1,12 +1,56 @@
 import { useEffect, useState, useCallback } from "react";
-import { ExternalLink, CheckCircle, XCircle, Clock, Image } from "lucide-react";
+import { ExternalLink, CheckCircle, XCircle, Clock, ImageIcon } from "lucide-react";
 import { api, Alert } from "../api";
 
+const S = {
+  card: (interested: boolean, skipped: boolean): React.CSSProperties => ({
+    background: "#151b25",
+    border: `1px solid ${interested ? "rgba(34,211,165,0.25)" : skipped ? "rgba(84,101,255,0.06)" : "rgba(84,101,255,0.15)"}`,
+    borderRadius: "12px",
+    padding: "16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    opacity: skipped ? 0.5 : 1,
+    transition: "all 0.2s ease",
+  }),
+  btn: (color: string, border: string): React.CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: "5px",
+    fontSize: "12px",
+    fontWeight: 500,
+    color,
+    background: "transparent",
+    border: `1px solid ${border}`,
+    padding: "7px 12px",
+    borderRadius: "8px",
+    transition: "all 0.2s ease",
+    cursor: "pointer",
+    outline: "none",
+    fontFamily: "inherit",
+  }),
+};
+
 function ScoreBadge({ score }: { score: number }) {
-  const color =
-    score >= 70 ? "bg-green-500" : score >= 40 ? "bg-yellow-500" : "bg-red-500";
+  const [bg, color] =
+    score >= 70
+      ? ["rgba(34,211,165,0.12)", "#22d3a5"]
+      : score >= 40
+      ? ["rgba(245,158,11,0.12)", "#f59e0b"]
+      : ["rgba(239,68,68,0.12)", "#ef4444"];
   return (
-    <span className={`${color} text-white text-xs font-bold px-2 py-0.5 rounded-full`}>
+    <span
+      style={{
+        background: bg,
+        color,
+        fontSize: "11px",
+        fontWeight: 700,
+        padding: "3px 9px",
+        borderRadius: "20px",
+        letterSpacing: "0.02em",
+      }}
+    >
       {score}/100
     </span>
   );
@@ -14,95 +58,202 @@ function ScoreBadge({ score }: { score: number }) {
 
 function formatAge(minutes: number | null): string {
   if (minutes === null) return "";
-  if (minutes < 60) return `Vor ${Math.round(minutes)} Min`;
-  return `Vor ${Math.round(minutes / 60)} Std`;
+  if (minutes < 60) return `${Math.round(minutes)} Min`;
+  return `${Math.round(minutes / 60)} Std`;
 }
 
 function AlertCard({ alert, onAction }: { alert: Alert; onAction: () => void }) {
+  const interested = alert.user_action === "interested";
+  const skipped = alert.user_action === "skipped";
+
   const handleAction = async (action: string) => {
     await api.alerts.updateAction(alert.id, action);
     onAction();
   };
 
   return (
-    <div
-      className={`bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 ${
-        alert.user_action === "interested"
-          ? "border-green-700"
-          : alert.user_action === "skipped"
-          ? "border-gray-700 opacity-60"
-          : "border-gray-800"
-      }`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap mb-1">
+    <div style={S.card(interested, skipped)}>
+      {/* Top row: badges + title / price */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              flexWrap: "wrap",
+              marginBottom: "7px",
+            }}
+          >
             <ScoreBadge score={alert.score} />
+            <span
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                fontSize: "11px",
+                color: "#22d3a5",
+                fontWeight: 500,
+              }}
+            >
+              <span
+                style={{
+                  width: "6px",
+                  height: "6px",
+                  borderRadius: "50%",
+                  background: "#22d3a5",
+                  display: "inline-block",
+                  flexShrink: 0,
+                }}
+              />
+              Aktiv
+            </span>
             {alert.age_minutes !== null && alert.age_minutes < 120 && (
-              <span className="text-xs text-blue-400 flex items-center gap-1">
-                <Clock size={11} /> Neu
+              <span
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  fontSize: "11px",
+                  color: "#5465ff",
+                }}
+              >
+                <Clock size={10} /> Neu
               </span>
             )}
           </div>
-          <p className="font-semibold text-white leading-snug line-clamp-2">
+          <p
+            style={{
+              fontSize: "14px",
+              fontWeight: 600,
+              color: "#f0f4ff",
+              lineHeight: "1.4",
+              overflow: "hidden",
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+            }}
+          >
             {alert.title}
           </p>
         </div>
-        <div className="text-right flex-shrink-0">
-          <p className="text-xl font-bold text-white">{alert.price.toFixed(0)}€</p>
-          <p className="text-xs text-red-400 font-medium">
-            -{alert.price_delta_percent.toFixed(0)}% unter Avg
+
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <p style={{ fontSize: "22px", fontWeight: 700, color: "#f0f4ff", lineHeight: 1 }}>
+            {alert.price.toFixed(0)}€
+          </p>
+          <p style={{ fontSize: "11px", color: "#5465ff", fontWeight: 600, marginTop: "3px" }}>
+            -{alert.price_delta_percent.toFixed(0)}% unter Ø
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-400">
-        <span>📊 Durchschnitt: {alert.rolling_average.toFixed(0)}€</span>
-        <span>💰 Profit: ~{alert.expected_profit.toFixed(0)}€</span>
-        {alert.location && <span>📍 {alert.location}</span>}
-        <span className="flex items-center gap-1">
-          <Image size={11} /> {alert.images_count} Fotos
-        </span>
-        {alert.age_minutes !== null && (
-          <span className="flex items-center gap-1">
-            <Clock size={11} /> {formatAge(alert.age_minutes)}
+      {/* Stats grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px 16px" }}>
+        <span style={{ fontSize: "12px", color: "#8a97b0" }}>
+          Ø{" "}
+          <span style={{ color: "#f0f4ff", fontWeight: 500 }}>
+            {alert.rolling_average.toFixed(0)}€
           </span>
+        </span>
+        <span style={{ fontSize: "12px", color: "#22d3a5", fontWeight: 600 }}>
+          +{alert.expected_profit.toFixed(0)}€ Profit
+        </span>
+        {alert.location && (
+          <span style={{ fontSize: "12px", color: "#8a97b0" }}>📍 {alert.location}</span>
         )}
-        <span className="text-gray-600">
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "4px",
+            fontSize: "12px",
+            color: "#8a97b0",
+          }}
+        >
+          <ImageIcon size={11} />
+          {alert.images_count} Fotos
+          {alert.age_minutes !== null && (
+            <>
+              {" "}·{" "}
+              <Clock size={10} />
+              {formatAge(alert.age_minutes)}
+            </>
+          )}
+        </span>
+        <span style={{ fontSize: "11px", color: "#4a5568", gridColumn: "1 / -1" }}>
           {new Date(alert.alerted_at).toLocaleString("de-AT")}
         </span>
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* Actions */}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
         <a
           href={alert.url}
           target="_blank"
           rel="noreferrer"
-          className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 bg-gray-800 hover:bg-gray-750 px-3 py-1.5 rounded-lg flex-1 justify-center transition-colors"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "6px",
+            fontSize: "12px",
+            fontWeight: 600,
+            color: "#f0f4ff",
+            background: "#5465ff",
+            padding: "8px 14px",
+            borderRadius: "8px",
+            flex: 1,
+            transition: "background 0.2s ease",
+            textDecoration: "none",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "#788bff")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#5465ff")}
         >
-          <ExternalLink size={13} /> Zum Inserat
+          <ExternalLink size={12} /> Zum Inserat →
         </a>
+
         {!alert.user_action && (
           <>
             <button
               onClick={() => handleAction("interested")}
-              className="flex items-center gap-1 text-xs text-green-400 hover:text-green-300 bg-gray-800 hover:bg-gray-750 px-3 py-1.5 rounded-lg transition-colors"
+              style={S.btn("#22d3a5", "rgba(34,211,165,0.3)")}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(34,211,165,0.1)";
+                e.currentTarget.style.borderColor = "#22d3a5";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.borderColor = "rgba(34,211,165,0.3)";
+              }}
             >
-              <CheckCircle size={13} /> Interessiert
+              <CheckCircle size={12} /> Interessiert
             </button>
             <button
               onClick={() => handleAction("skipped")}
-              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 bg-gray-800 hover:bg-gray-750 px-3 py-1.5 rounded-lg transition-colors"
+              style={S.btn("#4a5568", "rgba(74,85,104,0.3)")}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "#8a97b0";
+                e.currentTarget.style.borderColor = "rgba(138,151,176,0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "#4a5568";
+                e.currentTarget.style.borderColor = "rgba(74,85,104,0.3)";
+              }}
             >
-              <XCircle size={13} /> Skip
+              <XCircle size={12} /> Skip
             </button>
           </>
         )}
-        {alert.user_action === "interested" && (
-          <span className="text-xs text-green-500 font-medium">✅ Interessiert</span>
+        {interested && (
+          <span style={{ fontSize: "12px", color: "#22d3a5", fontWeight: 500 }}>
+            ✅ Interessiert
+          </span>
         )}
-        {alert.user_action === "skipped" && (
-          <span className="text-xs text-gray-500 font-medium">❌ Übersprungen</span>
+        {skipped && (
+          <span style={{ fontSize: "12px", color: "#4a5568", fontWeight: 500 }}>
+            ❌ Übersprungen
+          </span>
         )}
       </div>
     </div>
@@ -110,6 +261,17 @@ function AlertCard({ alert, onAction }: { alert: Alert; onAction: () => void }) 
 }
 
 type SortKey = "score" | "alerted_at" | "expected_profit";
+
+const inputStyle: React.CSSProperties = {
+  background: "#19212e",
+  color: "#f0f4ff",
+  fontSize: "12px",
+  border: "1px solid rgba(84,101,255,0.2)",
+  borderRadius: "8px",
+  padding: "6px 10px",
+  outline: "none",
+  fontFamily: "inherit",
+};
 
 export default function AlertFeed() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -126,15 +288,16 @@ export default function AlertFeed() {
         page,
         page_size: 20,
         min_score: minScore > 0 ? minScore : undefined,
-        user_action: showUnseen ? undefined : undefined,
       });
       setAlerts(res.alerts);
     } finally {
       setLoading(false);
     }
-  }, [page, minScore, showUnseen]);
+  }, [page, minScore]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const sorted = [...alerts].sort((a, b) => {
     if (sortKey === "score") return b.score - a.score;
@@ -145,37 +308,84 @@ export default function AlertFeed() {
   const filtered = showUnseen ? sorted.filter((a) => !a.user_action) : sorted;
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold">Alert Feed</h2>
+    <div style={{ maxWidth: "760px", margin: "0 auto" }}>
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "24px",
+        }}
+      >
+        <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#f0f4ff" }}>Alert Feed</h2>
         <button
           onClick={load}
-          className="text-xs text-blue-400 hover:text-blue-300 bg-gray-800 px-3 py-1.5 rounded-lg"
+          style={{
+            fontSize: "12px",
+            fontWeight: 500,
+            color: "#5465ff",
+            background: "transparent",
+            border: "1px solid rgba(84,101,255,0.3)",
+            padding: "6px 14px",
+            borderRadius: "8px",
+            transition: "all 0.2s ease",
+            cursor: "pointer",
+            outline: "none",
+            fontFamily: "inherit",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(84,101,255,0.1)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
           Aktualisieren
         </button>
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 flex flex-wrap gap-4 items-center">
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400">Min Score</label>
+      {/* Filters */}
+      <div
+        style={{
+          background: "#151b25",
+          border: "1px solid rgba(84,101,255,0.15)",
+          borderRadius: "12px",
+          padding: "14px 18px",
+          marginBottom: "16px",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "16px",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <label style={{ fontSize: "12px", color: "#8a97b0" }}>Min Score</label>
           <input
             type="range"
             min={0}
             max={100}
             value={minScore}
-            onChange={(e) => { setMinScore(Number(e.target.value)); setPage(0); }}
-            className="w-28"
+            onChange={(e) => {
+              setMinScore(Number(e.target.value));
+              setPage(0);
+            }}
+            style={{ width: "100px", accentColor: "#5465ff" }}
           />
-          <span className="text-xs font-mono text-white w-8">{minScore}</span>
+          <span
+            style={{
+              fontSize: "12px",
+              fontFamily: "monospace",
+              color: "#f0f4ff",
+              minWidth: "28px",
+            }}
+          >
+            {minScore}
+          </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400">Sortierung</label>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <label style={{ fontSize: "12px", color: "#8a97b0" }}>Sortierung</label>
           <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700"
+            style={inputStyle}
           >
             <option value="alerted_at">Datum</option>
             <option value="score">Score</option>
@@ -183,50 +393,94 @@ export default function AlertFeed() {
           </select>
         </div>
 
-        <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            fontSize: "12px",
+            color: "#8a97b0",
+            cursor: "pointer",
+          }}
+        >
           <input
             type="checkbox"
             checked={showUnseen}
             onChange={(e) => setShowUnseen(e.target.checked)}
-            className="rounded"
+            style={{ accentColor: "#5465ff" }}
           />
           Nur ungesehene
         </label>
       </div>
 
+      {/* Loading */}
       {loading && (
-        <div className="text-center py-12 text-gray-500">Lade Alerts…</div>
-      )}
-
-      {!loading && filtered.length === 0 && (
-        <div className="text-center py-12 text-gray-500">
-          Keine Alerts gefunden. Der Bot läuft und sammelt Daten…
+        <div style={{ textAlign: "center", padding: "64px 0", color: "#4a5568" }}>
+          <div className="pulse" style={{ fontSize: "13px" }}>
+            Lade Alerts…
+          </div>
         </div>
       )}
 
-      <div className="flex flex-col gap-3">
+      {/* Empty */}
+      {!loading && filtered.length === 0 && (
+        <div style={{ textAlign: "center", padding: "64px 0" }}>
+          <p style={{ fontSize: "36px", marginBottom: "14px" }}>🔍</p>
+          <p style={{ fontSize: "14px", color: "#4a5568" }}>
+            Keine Alerts gefunden. Der Bot läuft und sammelt Daten…
+          </p>
+        </div>
+      )}
+
+      {/* Cards */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         {filtered.map((alert) => (
           <AlertCard key={alert.id} alert={alert} onAction={load} />
         ))}
       </div>
 
-      <div className="flex justify-between mt-6">
-        <button
-          onClick={() => setPage((p) => Math.max(0, p - 1))}
-          disabled={page === 0}
-          className="text-xs text-gray-400 disabled:opacity-30 bg-gray-800 px-4 py-2 rounded-lg"
-        >
-          ← Zurück
-        </button>
-        <span className="text-xs text-gray-500 self-center">Seite {page + 1}</span>
-        <button
-          onClick={() => setPage((p) => p + 1)}
-          disabled={alerts.length < 20}
-          className="text-xs text-gray-400 disabled:opacity-30 bg-gray-800 px-4 py-2 rounded-lg"
-        >
-          Weiter →
-        </button>
-      </div>
+      {/* Pagination */}
+      {alerts.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "24px" }}>
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            style={{
+              fontSize: "12px",
+              color: page === 0 ? "#4a5568" : "#8a97b0",
+              background: "#151b25",
+              border: "1px solid rgba(84,101,255,0.15)",
+              padding: "8px 18px",
+              borderRadius: "8px",
+              cursor: page === 0 ? "default" : "pointer",
+              fontFamily: "inherit",
+              outline: "none",
+            }}
+          >
+            ← Zurück
+          </button>
+          <span style={{ fontSize: "12px", color: "#4a5568", alignSelf: "center" }}>
+            Seite {page + 1}
+          </span>
+          <button
+            onClick={() => setPage((p) => p + 1)}
+            disabled={alerts.length < 20}
+            style={{
+              fontSize: "12px",
+              color: alerts.length < 20 ? "#4a5568" : "#8a97b0",
+              background: "#151b25",
+              border: "1px solid rgba(84,101,255,0.15)",
+              padding: "8px 18px",
+              borderRadius: "8px",
+              cursor: alerts.length < 20 ? "default" : "pointer",
+              fontFamily: "inherit",
+              outline: "none",
+            }}
+          >
+            Weiter →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

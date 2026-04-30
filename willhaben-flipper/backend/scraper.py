@@ -2,6 +2,7 @@ import asyncio
 import json as _json
 import logging
 import random
+import requests as _requests
 from datetime import datetime, timezone
 from typing import List, Optional
 from urllib.parse import quote
@@ -31,6 +32,28 @@ _semaphore: Optional[asyncio.Semaphore] = None
 
 # Log one raw item per scrape run so field names are always visible
 _raw_logged = False
+
+_LIVENESS_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
+
+def is_listing_active(url: str) -> bool:
+    try:
+        resp = _requests.head(
+            url,
+            timeout=5,
+            allow_redirects=True,
+            headers=_LIVENESS_HEADERS,
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        logger.warning(f"Liveness check failed for {url}: {e}")
+        return False
 
 
 def get_semaphore() -> asyncio.Semaphore:
@@ -150,7 +173,7 @@ async def _fetch_page(
 ) -> List[dict]:
     global _raw_logged
 
-    encoded_keyword = quote(keyword)
+    encoded_keyword = quote(keyword, safe="")
     parts: list[str] = [f"keyword={encoded_keyword}", f"rows=30", f"page={page}"]
     if max_price is not None:
         parts.append(f"PRICE_TO={int(max_price)}")
@@ -285,6 +308,10 @@ async def scrape_profile(profile: dict) -> List[dict]:
                 if listing["price"] > max_price:
                     continue
                 if min_price and listing["price"] < min_price:
+                    continue
+                active = await asyncio.to_thread(is_listing_active, listing["url"])
+                if not active:
+                    logger.info(f"Skipping inactive listing: '{listing.get('title')}' {listing['url']}")
                     continue
                 results.append(listing)
 

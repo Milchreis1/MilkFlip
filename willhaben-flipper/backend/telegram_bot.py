@@ -9,9 +9,11 @@ from telegram.ext import (
     ContextTypes,
 )
 
+import asyncio
 import database
 from config import settings
 from models import ScoredListing
+from scraper import is_listing_active
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,11 @@ async def send_alert(scored: ScoredListing):
         return
     chat_id = settings.TELEGRAM_CHAT_ID
     if not chat_id:
+        return
+    active = await asyncio.to_thread(is_listing_active, scored.listing.url)
+    if not active:
+        database.mark_listing_inactive(scored.listing.id)
+        logger.info(f"Skipped Telegram alert — listing gone: '{scored.listing.title}'")
         return
     text = build_alert_message(scored)
     keyboard = build_alert_keyboard(scored.listing.id)
