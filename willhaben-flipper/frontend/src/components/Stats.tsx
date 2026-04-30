@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Eye, Bell, TrendingUp, DollarSign } from "lucide-react";
+import { Eye, Bell, TrendingUp, DollarSign, LucideIcon } from "lucide-react";
 import { api, StatsData } from "../api";
 
 function MetricCard({
@@ -10,7 +10,7 @@ function MetricCard({
 }: {
   label: string;
   value: string;
-  icon: React.FC<{ size?: number; className?: string }>;
+  icon: LucideIcon;
   color: string;
 }) {
   return (

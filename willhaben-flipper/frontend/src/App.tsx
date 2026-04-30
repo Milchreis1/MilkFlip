@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bell, TrendingUp, Search, BarChart2, Settings as SettingsIcon } from "lucide-react";
+import { Bell, TrendingUp, Search, BarChart2, Settings as SettingsIcon, LucideIcon } from "lucide-react";
 import AlertFeed from "./components/AlertFeed";
 import PriceChart from "./components/PriceChart";
 import SearchProfiles from "./components/SearchProfiles";
@@ -8,7 +8,7 @@ import Settings from "./components/Settings";
 
 type Tab = "alerts" | "chart" | "profiles" | "stats" | "settings";
 
-const NAV: { key: Tab; label: string; Icon: React.FC<{ size?: number }> }[] = [
+const NAV: { key: Tab; label: string; Icon: LucideIcon }[] = [
   { key: "alerts", label: "Alerts", Icon: Bell },
   { key: "chart", label: "Preishistorie", Icon: TrendingUp },
   { key: "profiles", label: "Suchprofile", Icon: Search },
